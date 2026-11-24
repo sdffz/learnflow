@@ -187,7 +187,10 @@ def test_catalog_normalizes_courses_and_document_links():
         raise AssertionError(f"unexpected request: {request.url}")
 
     adapter = _adapter(handler)
-    courses = adapter.catalog({"auth": "session-token"})
+    # 章节与附件只在被显式指定时抓取
+    courses = adapter.catalog(
+        {"auth": "session-token"}, deep_course_ids={"course-1:class-1"}
+    )
 
     assert len(courses) == 1
     assert courses[0].title == "高等数学"
@@ -227,7 +230,9 @@ def test_catalog_maps_unsupported_files_with_reason():
         )
 
     adapter = _adapter(handler)
-    files = adapter.catalog({"auth": "session-token"})[0].documents
+    files = adapter.catalog(
+        {"auth": "session-token"}, deep_course_ids={"c1:k1"}
+    )[0].documents
 
     assert files[0].supported is False
     assert files[0].excluded_reason == "unsupported_file_type"
@@ -269,7 +274,10 @@ def test_catalog_has_global_page_budget(monkeypatch):
     adapter = _adapter(handler)
 
     with pytest.raises(ValueError, match="catalog_budget_exceeded"):
-        adapter.catalog({"auth": "session-token"})
+        adapter.catalog(
+            {"auth": "session-token"},
+            deep_course_ids={"course-0:class-0", "course-1:class-1"},
+        )
 
 
 def test_catalog_deadline_fails_closed(monkeypatch):
@@ -302,7 +310,7 @@ def test_catalog_deadline_fails_closed(monkeypatch):
     adapter = _adapter(handler)
 
     with pytest.raises(ValueError, match="upstream_timeout"):
-        adapter.catalog({"auth": "session-token"})
+        adapter.catalog({"auth": "session-token"}, deep_course_ids={"course:class"})
 
 
 @pytest.mark.parametrize(
@@ -370,3 +378,79 @@ def test_download_writes_checksum_and_filename(tmp_path):
     assert destination.read_bytes() == b"%PDF-1.4 sample"
     assert len(checksum) == 64
     assert Path(destination).stat().st_size == 15
+
+
+def test_catalog_reads_the_real_backclazzdata_shape():
+    """The upstream nests the class id in content and the course id deeper.
+
+    Regression: /mycourse/backclazzdata returns
+    ``channelList[i].content.id`` (class) with the course under
+    ``content.course.data[0].id``. Neither key is named courseid/clazzid, so a
+    naive walker produced an empty catalog for a user with 37 enrolments.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "mooc1-api.chaoxing.test":
+            return httpx.Response(
+                200,
+                json={
+                    "result": 1,
+                    "msg": "获取成功",
+                    "channelList": [
+                        {
+                            "cataName": "课程",
+                            "cpi": 496659214,
+                            "id": 0,
+                            "key": 155189510,
+                            "content": {
+                                "id": 155189510,
+                                "name": "202116530-002",
+                                "cpi": 496659214,
+                                "studentcount": 49,
+                                "course": {
+                                    "data": [
+                                        {
+                                            "id": 267280152,
+                                            "name": "大学生职业生涯规划",
+                                            "teacherfactor": "洪云 等",
+                                            "belongSchoolId": "1765",
+                                        }
+                                    ]
+                                },
+                            },
+                        },
+                        {
+                            "cataName": "课程",
+                            "content": {
+                                "id": 153362349,
+                                "name": "算法分析与设计-01",
+                                "cpi": 496659214,
+                                "course": {
+                                    "data": [
+                                        {
+                                            "id": 266595280,
+                                            "name": "算法分析与设计",
+                                            "teacherfactor": "雍真",
+                                        }
+                                    ]
+                                },
+                            },
+                        },
+                        {"cataName": "专题", "content": {"id": 1}},
+                    ],
+                },
+            )
+        if request.url.host == "mooc1.chaoxing.test":
+            return httpx.Response(200, text="<a href='/files/a.pdf'>a.pdf</a>")
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    adapter = _adapter(handler)
+    courses = adapter.catalog({"auth": "session-token"})
+
+    assert [course.title for course in courses] == [
+        "大学生职业生涯规划",
+        "算法分析与设计",
+    ]
+    assert courses[0].teacher == "洪云 等"
+    assert courses[1].teacher == "雍真"
+    assert courses[0].id == "267280152:155189510"

@@ -211,3 +211,77 @@ def test_invalid_connection_expiry_is_rejected(tmp_path):
             cookies={"auth": "secret"},
             expires_at="not-a-date",
         )
+
+
+def test_latest_course_contents_survive_a_new_preview(tmp_path):
+    """Re-opening the dialog must not discard fetched documents.
+
+    Regression: every 读取课程资料 built a brand-new preview with empty
+    courses, so documents read a moment earlier disappeared and each course
+    had to be fetched again.
+    """
+    store = _store(tmp_path)
+    detail_rich = PreviewCourse(
+        id="c1:k1",
+        title="Python基础",
+        teacher="程老师",
+        documents=[
+            PreviewFile(
+                id="f1",
+                name="第1章.pptx",
+                extension=".pptx",
+                size_bytes=900,
+                supported=True,
+            )
+        ],
+    )
+    first = store.create_preview(
+        workspace_id="w1",
+        user_id="u1",
+        courses=[detail_rich],
+        expires_at=_future(),
+    )
+
+    cached = store.latest_course_contents("w1", "u1")
+    assert cached["c1:k1"].documents[0].name == "第1章.pptx"
+
+    # A later preview created with the shallow (document-less) catalog entry.
+    shallow = PreviewCourse(id="c1:k1", title="Python基础", teacher="程老师")
+    second = store.create_preview(
+        workspace_id="w1",
+        user_id="u1",
+        courses=[cached.get(shallow.id, shallow)],
+        expires_at=_future(),
+    )
+
+    reopened = store.get_preview("w1", "u1", second.id)
+    assert reopened is not None
+    assert reopened.courses[0].documents[0].name == "第1章.pptx"
+    assert first.total_documents == 1
+
+
+def test_latest_course_contents_are_scoped_to_the_user(tmp_path):
+    store = _store(tmp_path)
+    store.create_preview(
+        workspace_id="w1",
+        user_id="u1",
+        courses=[
+            PreviewCourse(
+                id="c1:k1",
+                title="课程",
+                documents=[
+                    PreviewFile(
+                        id="f1",
+                        name="a.pdf",
+                        extension=".pdf",
+                        size_bytes=1,
+                        supported=True,
+                    )
+                ],
+            )
+        ],
+        expires_at=_future(),
+    )
+
+    assert store.latest_course_contents("w1", "u2") == {}
+    assert "c1:k1" in store.latest_course_contents("w1", "u1")

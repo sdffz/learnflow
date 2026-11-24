@@ -388,6 +388,17 @@ export const learningConnectorApi = {
     return request("/learning/chaoxing/previews", { method: "POST" });
   },
 
+  loadCourseDocuments(
+    previewId: string,
+    courseId: string,
+  ): Promise<LearningImportPreview> {
+    return request(
+      `/learning/chaoxing/previews/${encodeURIComponent(previewId)}` +
+        `/courses/${encodeURIComponent(courseId)}/documents`,
+      { method: "POST" },
+    );
+  },
+
   previewZip(file: File): Promise<LearningImportPreview> {
     const body = new FormData();
     body.append("file", file);

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import html as html_module
 import ipaddress
 import json
 import os
@@ -29,8 +30,8 @@ DEFAULT_COURSE_API_URL = (
     "https://mooc1-api.chaoxing.com/mycourse/backclazzdata?view=json&rss=1"
 )
 DEFAULT_FOLDER_URL = (
-    "https://mooc1.chaoxing.com/mycourse/studentcourse"
-    "?courseId={course_id}&clazzid={class_id}&vc=1&cpi={cpi}"
+    "https://mooc2-ans.chaoxing.com/mooc2-ans/mycourse/studentcourse"
+    "?courseid={course_id}&clazzid={class_id}&cpi={cpi}"
 )
 MAX_IMPORT_FILE_BYTES = 100 * 1024 * 1024
 MAX_QR_BYTES = 1024 * 1024
@@ -38,6 +39,7 @@ MAX_CATALOG_RESPONSE_BYTES = 2 * 1024 * 1024
 MAX_CATALOG_TOTAL_PAGES = 40
 CATALOG_DEADLINE_SECONDS = 45
 MAX_CATALOG_PAGES_PER_COURSE = 8
+MAX_CHAPTERS_PER_COURSE = 40
 LOGIN_TTL = timedelta(minutes=5)
 ALLOWED_HOST_SUFFIXES = (".chaoxing.com", ".cldisk.com")
 VIDEO_EXTENSIONS = {".mp4", ".m3u8", ".flv", ".avi", ".mov", ".mkv", ".webm"}
@@ -198,8 +200,65 @@ def _first_string(mapping: dict, names: tuple[str, ...]) -> str:
     return ""
 
 
-def _course_cards(payload: dict) -> list[dict]:
+def _channel_cards(payload: dict) -> list[dict]:
+    """Read the shape /mycourse/backclazzdata actually returns.
+
+    The response nests each enrolment as
+    ``channelList[i].content`` where ``content.id`` is the class id and
+    ``content.course.data[0]`` is the course (its ``id`` is the course id).
+    Neither ``courseid`` nor ``clazzid`` appears verbatim, so the generic
+    walker below finds nothing and the catalog comes back empty.
+    """
     cards: list[dict] = []
+    seen: set[str] = set()
+    channels = payload.get("channelList")
+    if not isinstance(channels, list):
+        return cards
+    for channel in channels:
+        if not isinstance(channel, dict):
+            continue
+        content = channel.get("content")
+        if not isinstance(content, dict):
+            continue
+        course = content.get("course")
+        entries = course.get("data") if isinstance(course, dict) else None
+        if not isinstance(entries, list) or not entries:
+            continue
+        first = next((item for item in entries if isinstance(item, dict)), None)
+        if first is None:
+            continue
+        course_id = _first_string(first, ("courseid", "courseId", "id"))
+        class_id = _first_string(content, ("clazzid", "classId", "clazzId", "id"))
+        title = _first_string(first, ("name", "courseName", "title")) or _first_string(
+            content, ("name",)
+        )
+        if not course_id or not class_id or not title:
+            continue
+        key = f"{course_id}:{class_id}"
+        if key in seen:
+            continue
+        seen.add(key)
+        cards.append(
+            {
+                "courseid": course_id,
+                "clazzid": class_id,
+                "name": title,
+                "teacherfactor": _first_string(
+                    first, ("teacherfactor", "teacher", "teacherName")
+                ),
+                "cpi": _first_string(content, ("cpi",))
+                or _first_string(channel, ("cpi", "key")),
+            }
+        )
+    return cards
+
+
+def _course_cards(payload: dict) -> list[dict]:
+    cards = _channel_cards(payload)
+    if cards:
+        return cards
+    # Fallback for flatter payloads (and for fixtures).
+    cards = []
     seen: set[str] = set()
     for mapping in _walk_dicts(payload):
         title = _first_string(mapping, ("name", "courseName", "title"))
@@ -216,6 +275,74 @@ def _course_cards(payload: dict) -> list[dict]:
         seen.add(key)
         cards.append(mapping)
     return cards
+
+
+def _chapter_items(html: str) -> list[tuple[str, str]]:
+    """Read the chapter list out of a course page.
+
+    Rows carry ``onclick="toOld(courseid, knowledgeid, clazzid, 0)"`` and the
+    chapter title in a ``title`` attribute. There are no anchors to follow, so
+    the link walker alone finds nothing on a course page.
+    """
+    items: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    pattern = re.compile(
+        r"toOld\('(?P<course>\d+)',\s*'(?P<kid>\d+)'[^>]*?title=\"(?P<title>[^\"]*)\"",
+        re.S,
+    )
+    for match in pattern.finditer(html):
+        kid = match.group("kid")
+        if kid in seen:
+            continue
+        seen.add(kid)
+        items.append((kid, match.group("title").strip()))
+    return items
+
+
+def _card_attachments(html: str) -> list[dict]:
+    """Extract the attachment JSON embedded in a knowledge/cards response.
+
+    Each resource is a ``data="{...}"`` attribute carrying objectid, name,
+    type and size.
+    """
+    attachments: list[dict] = []
+    for blob in re.findall(r'data="(\{[^"]+\})"', html):
+        try:
+            payload = json.loads(html_module.unescape(blob))
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        object_id = str(payload.get("objectid") or "").strip()
+        name = str(payload.get("name") or "").strip()
+        if not object_id or not name:
+            continue
+        try:
+            size = int(payload.get("size") or 0)
+        except (TypeError, ValueError):
+            size = 0
+        attachments.append(
+            {
+                "objectid": object_id,
+                "name": name,
+                "type": str(payload.get("type") or "").strip(),
+                "size": size,
+            }
+        )
+    return attachments
+
+
+def _https_url(value: str) -> str:
+    """Upgrade an http URL to https.
+
+    chaoxing hands out http:// download links (d*.cldisk.com) and redirects
+    course pages to http:// even for https requests. The hosts serve https
+    fine, so upgrading keeps the https-only policy without discarding a valid
+    resource.
+    """
+    if value.startswith("http://"):
+        return "https://" + value[len("http://"):]
+    return value
 
 
 def _bounded_get(
@@ -243,6 +370,11 @@ def _bounded_get(
                 if not location:
                     raise ChaoxingAdapterError("invalid_upstream_redirect")
                 current = urljoin(str(safe_url), location)
+                # chaoxing answers course pages with an http:// redirect even
+                # when the request was https. Upgrade in place instead of
+                # failing: the host is unchanged and https is what we send.
+                if current.startswith("http://"):
+                    current = "https://" + current[len("http://"):]
                 continue
             response.raise_for_status()
             content_length = int(
@@ -548,7 +680,19 @@ class ChaoxingAdapter:
         client.cookies.update(cookies)
         return client
 
-    def catalog(self, cookies: dict[str, str]) -> list[PreviewCourse]:
+    def catalog(
+        self,
+        cookies: dict[str, str],
+        *,
+        deep_course_ids: set[str] | None = None,
+    ) -> list[PreviewCourse]:
+        """List the learner's courses.
+
+        Course pages are walked only for the ids in ``deep_course_ids``. A real
+        account can hold dozens of courses and every chapter costs a request,
+        so listing stays fast and documents are fetched per course on demand.
+        """
+        deep = deep_course_ids or set()
         client = self._client_with_cookies(cookies)
         owned = self.client is None
         try:
@@ -570,16 +714,67 @@ class ChaoxingAdapter:
             cards = _course_cards(payload if isinstance(payload, dict) else {})
             deadline = time.monotonic() + CATALOG_DEADLINE_SECONDS
             budget = {"pages": 0}
-            return [
-                self._course_from_card(
-                    client,
-                    card,
-                    cookies,
-                    deadline=deadline,
-                    budget=budget,
+            courses: list[PreviewCourse] = []
+            for card in cards:
+                course_id = _first_string(card, ("courseid", "courseId", "id"))
+                class_id = _first_string(card, ("clazzid", "classId", "clazzId"))
+                key = f"{course_id}:{class_id}" if class_id else course_id
+                if key not in deep and course_id not in deep:
+                    courses.append(
+                        PreviewCourse(
+                            id=key,
+                            title=_first_string(
+                                card, ("name", "courseName", "title")
+                            )
+                            or "未命名课程",
+                            teacher=_first_string(
+                                card, ("teacherfactor", "teacher", "teacherName")
+                            ),
+                        )
+                    )
+                    continue
+                courses.append(
+                    self._course_from_card(
+                        client,
+                        card,
+                        cookies,
+                        deadline=deadline,
+                        budget=budget,
+                    )
                 )
-                for card in cards
-            ]
+            return courses
+        finally:
+            if owned:
+                client.close()
+
+    def course_documents(
+        self,
+        cookies: dict[str, str],
+        *,
+        course_id: str,
+        class_id: str,
+        cpi: str,
+        title: str = "",
+        teacher: str = "",
+    ) -> PreviewCourse:
+        """Fetch one course's chapters and attachments."""
+        client = self._client_with_cookies(cookies)
+        owned = self.client is None
+        try:
+            card = {
+                "courseid": course_id,
+                "clazzid": class_id,
+                "cpi": cpi,
+                "name": title,
+                "teacherfactor": teacher,
+            }
+            return self._course_from_card(
+                client,
+                card,
+                cookies,
+                deadline=time.monotonic() + CATALOG_DEADLINE_SECONDS * 2,
+                budget={"pages": 0},
+            )
         finally:
             if owned:
                 client.close()
@@ -617,6 +812,7 @@ class ChaoxingAdapter:
         queue = [(url, 0) for url in candidates if url]
         visited: set[str] = set()
         pages = 0
+        last_page_html = ""
         while queue and pages < MAX_CATALOG_PAGES_PER_COURSE:
             if time.monotonic() >= deadline:
                 raise ChaoxingAdapterError("upstream_timeout")
@@ -650,6 +846,7 @@ class ChaoxingAdapter:
                 continue
             if "登录" in response_text and "二维码" in response_text:
                 raise ChaoxingAdapterError("session_expired")
+            last_page_html = response_text
             parser = _LinkParser()
             try:
                 parser.feed(response_text)
@@ -731,13 +928,159 @@ class ChaoxingAdapter:
                         except ChaoxingAdapterError:
                             continue
                         queue.append((safe_next, depth + 1))
+
+        # Course pages embed the chapter list but no file anchors, so the
+        # attachments have to be pulled per chapter from knowledge/cards.
+        documents, videos = self._collect_chapter_attachments(
+            client,
+            page_html=last_page_html,
+            course_id=course_id,
+            class_id=class_id,
+            cpi=cpi,
+            documents=documents,
+            videos=videos,
+            seen_documents=seen_documents,
+            seen_videos=seen_videos,
+            deadline=deadline,
+            budget=budget,
+        )
         return PreviewCourse(
-            id=course_id,
+            # A course can have several classes; the pair is the real identity.
+            id=f"{course_id}:{class_id}" if class_id else course_id,
             title=title,
             teacher=teacher,
             documents=documents,
             video_links=videos,
         )
+
+    def _collect_chapter_attachments(
+        self,
+        client: httpx.Client,
+        *,
+        page_html: str,
+        course_id: str,
+        class_id: str,
+        cpi: str,
+        documents: list[PreviewFile],
+        videos: list[str],
+        seen_documents: set[str],
+        seen_videos: set[str],
+        deadline: float,
+        budget: dict[str, int],
+    ) -> tuple[list[PreviewFile], list[str]]:
+        """Walk the chapter list and pull each chapter's attachments.
+
+        A course page lists chapters but no files; the files live behind
+        knowledge/cards, one request per chapter. Work stops at the chapter
+        cap, the global page budget, or the deadline so a large course cannot
+        hold the preview open indefinitely.
+        """
+        chapters = _chapter_items(page_html)
+        if not chapters:
+            return documents, videos
+
+        cards_url = (
+            "https://mooc1.chaoxing.com/knowledge/cards"
+            f"?clazzid={class_id}&courseid={course_id}&cpi={cpi}&ut=s&num=0"
+        )
+        for knowledge_id, title in chapters[:MAX_CHAPTERS_PER_COURSE]:
+            if time.monotonic() >= deadline:
+                break
+            if budget["pages"] >= MAX_CATALOG_TOTAL_PAGES:
+                break
+            chapter_url = f"{cards_url}&knowledgeid={knowledge_id}"
+            budget["pages"] += 1
+            try:
+                _, body = _bounded_get(
+                    client,
+                    chapter_url,
+                    allowed_hosts=self.allowed_hosts,
+                    max_bytes=MAX_CATALOG_RESPONSE_BYTES,
+                    headers={"Referer": self.folder_url_template.format(
+                        course_id=course_id, class_id=class_id, cpi=cpi
+                    )},
+                )
+            except (ChaoxingAdapterError, httpx.HTTPError):
+                continue
+            for attachment in _card_attachments(body):
+                name = attachment["name"]
+                # Prefix with the chapter so an imported file is traceable back
+                # to where it came from.
+                label = f"{title} · {name}" if title else name
+                suffix = Path(name).suffix.casefold() or attachment["type"].casefold()
+                if not suffix.startswith("."):
+                    suffix = f".{suffix}" if suffix else ""
+                if suffix in VIDEO_EXTENSIONS:
+                    if name in seen_videos:
+                        continue
+                    seen_videos.add(name)
+                    videos.append(
+                        self._resource_url(client, attachment["objectid"], deadline)
+                        or f"{chapter_url}#{attachment['objectid']}"
+                    )
+                    continue
+                if not suffix:
+                    continue
+                file_id = hashlib.sha256(
+                    f"{course_id}:{attachment['objectid']}".encode()
+                ).hexdigest()[:24]
+                if file_id in seen_documents:
+                    continue
+                seen_documents.add(file_id)
+                supported = suffix in SUPPORTED_EXTENSIONS
+                remote = self._resource_url(
+                    client, attachment["objectid"], deadline
+                ) or f"{chapter_url}#{attachment['objectid']}"
+                documents.append(
+                    PreviewFile(
+                        id=file_id,
+                        name=label[:120],
+                        extension=suffix,
+                        size_bytes=attachment["size"],
+                        supported=supported,
+                        excluded_reason=(
+                            None if supported else "unsupported_file_type"
+                        ),
+                        remote_url=remote,
+                    )
+                )
+        return documents, videos
+
+    def _resource_url(
+        self,
+        client: httpx.Client,
+        object_id: str,
+        deadline: float,
+    ) -> str | None:
+        """Resolve an attachment's download URL through ananas/status."""
+        if time.monotonic() >= deadline:
+            return None
+        try:
+            _, body = _bounded_get(
+                client,
+                f"https://mooc1.chaoxing.com/ananas/status/{object_id}?flag=normal",
+                allowed_hosts=self.allowed_hosts,
+                max_bytes=64 * 1024,
+                # Without a chaoxing referer the status endpoint answers 403.
+                headers={"Referer": "https://mooc1.chaoxing.com/"},
+            )
+            payload = json.loads(body)
+        except (ChaoxingAdapterError, httpx.HTTPError, ValueError):
+            return None
+        if not isinstance(payload, dict):
+            return None
+        download = payload.get("download") or payload.get("downloadUrl")
+        if not isinstance(download, str) or not download.strip():
+            return None
+        try:
+            return str(
+                validate_chaoxing_url(
+                    _https_url(download.strip()),
+                    allowed_hosts=self.allowed_hosts,
+                )
+            )
+        except ChaoxingAdapterError:
+            return None
 
     def download(
         self,
@@ -757,7 +1100,7 @@ class ChaoxingAdapter:
         temporary.unlink(missing_ok=True)
         digest = hashlib.sha256()
         size = 0
-        current = source_url
+        current = _https_url(source_url)
         try:
             for _redirect in range(4):
                 safe_url = validate_chaoxing_url(
@@ -774,7 +1117,7 @@ class ChaoxingAdapter:
                         location = response.headers.get("location")
                         if not location:
                             raise ChaoxingAdapterError("invalid_upstream_redirect")
-                        current = urljoin(str(safe_url), location)
+                        current = _https_url(urljoin(str(safe_url), location))
                         continue
                     response.raise_for_status()
                     content_length = int(response.headers.get("content-length", "0") or 0)

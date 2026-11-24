@@ -4108,6 +4108,37 @@ h1 {
   background: #64805d;
 }
 
+.learning-state-icon.warn {
+  background: #b8722f;
+}
+
+.learning-inline-error {
+  margin: 10px 0 0;
+  padding: 9px 14px;
+  border-radius: 10px;
+  background: rgba(184, 114, 47, 0.09);
+  color: #96581f;
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+.learning-zip-steps {
+  margin: 12px auto 18px;
+  padding-left: 1.1em;
+  max-width: 42em;
+  text-align: left;
+  display: grid;
+  gap: 7px;
+  color: #4a6278;
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+
+.learning-zip-steps li::marker {
+  color: #e25d3f;
+  font-weight: 700;
+}
+
 .learning-state-card h3,
 .learning-step-heading h3,
 .learning-progress-heading h3 {
@@ -4991,4 +5022,29 @@ h1 {
   .mindmap-branches {
     max-height: 260px;
   }
+}
+
+.learning-course-option {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px 14px;
+  align-items: start;
+}
+
+.learning-course-option > label {
+  grid-column: 1;
+}
+
+.learning-course-option > details {
+  grid-column: 1;
+}
+
+.learning-load-docs {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
 }

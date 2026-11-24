@@ -40,6 +40,7 @@ interface Props {
 type Phase =
   | "loading"
   | "disabled"
+  | "unreachable"
   | "disconnected"
   | "connected"
   | "qr"
@@ -143,34 +144,38 @@ export default function LearningConnectorDialog({
     completedNoticeRef.current = null;
   }, []);
 
+  const loadStatus = useCallback(async () => {
+    setPhase("loading");
+    setError(null);
+    try {
+      const result = await learningConnectorApi.status();
+      if (!result.enabled) {
+        setPhase("disabled");
+        return;
+      }
+      if (result.connection?.status === "connected") {
+        setRemoteNickname(result.connection.remoteNickname);
+        setPhase("connected");
+        return;
+      }
+      setPhase("disconnected");
+    } catch (caught) {
+      setError(errorMessage(caught));
+      // A failed status probe is not the same as "not connected". Falling
+      // through to 未连接 used to render a QR button that could only fail.
+      setPhase("unreachable");
+    }
+  }, []);
+
+  const reloadStatus = useCallback(() => {
+    void loadStatus();
+  }, [loadStatus]);
+
   useEffect(() => {
     if (!open) return;
     reset();
-    let current = true;
-    learningConnectorApi
-      .status()
-      .then((result) => {
-        if (!current) return;
-        if (!result.enabled) {
-          setPhase("disabled");
-          return;
-        }
-        if (result.connection?.status === "connected") {
-          setRemoteNickname(result.connection.remoteNickname);
-          setPhase("connected");
-          return;
-        }
-        setPhase("disconnected");
-      })
-      .catch((caught) => {
-        if (!current) return;
-        setError(errorMessage(caught));
-        setPhase("disconnected");
-      });
-    return () => {
-      current = false;
-    };
-  }, [open, reset]);
+    void loadStatus();
+  }, [open, reset, loadStatus]);
 
   useEffect(() => {
     if (!open) return;
@@ -224,13 +229,51 @@ export default function LearningConnectorDialog({
       setSelectedCourses(new Set());
       setMappings(initialMappings);
       setPhase("preview");
-      setNotice(
-        result.courses.length
-          ? `已读取 ${result.courses.length} 门课程，请选择要导入的内容。`
-          : "没有找到可导入的课程资料。",
-      );
+      // A live account lists its courses, but chaoxing renders the document
+      // list client-side, so the extractor can come back with zero files. Say
+      // that plainly instead of implying the account is empty.
+      if (!result.courses.length) {
+        setNotice("没有找到可导入的课程资料。");
+      } else if (!result.totalDocuments && !result.totalVideoLinks) {
+        setNotice(
+          `已读取 ${result.courses.length} 门课程，但没能自动提取到文档清单。` +
+            "学习通的资料目录需要在浏览器里渲染，建议按课程下载资料后用 ZIP 方式导入。",
+        );
+      } else {
+        setNotice(
+          `已读取 ${result.courses.length} 门课程，请选择要导入的内容。`,
+        );
+      }
     },
     [courses],
+  );
+
+  const loadCourseDocuments = useCallback(
+    async (courseId: string) => {
+      if (!preview) return;
+      setBusy(`docs:${courseId}`);
+      setError(null);
+      try {
+        const updated = await learningConnectorApi.loadCourseDocuments(
+          preview.id,
+          courseId,
+        );
+        // Keep the existing selections and mappings; only the files changed.
+        setPreview(updated);
+        const course = updated.courses.find((item) => item.id === courseId);
+        const count = course?.documents.filter((f) => f.supported).length ?? 0;
+        setNotice(
+          count
+            ? `已读取「${course?.title ?? "该课程"}」的 ${count} 份资料。`
+            : `「${course?.title ?? "该课程"}」没有可导入的文档，可能只有视频或测验。`,
+        );
+      } catch (caught) {
+        setError(errorMessage(caught));
+      } finally {
+        setBusy(null);
+      }
+    },
+    [preview],
   );
 
   const pollLogin = useCallback(async () => {
@@ -257,14 +300,31 @@ export default function LearningConnectorDialog({
         setNotice("等待使用学习通 App 扫码…");
         return;
       }
+      // The server no longer knows this login (expired, restarted, or the
+      // runtime data was reset). Reset to a usable state instead of leaving
+      // the user on a screen whose only button can never succeed.
+      const reason = result.message ?? result.status;
       setLogin(null);
       setPhase("disconnected");
-      setError(
-        ERROR_MESSAGES[result.message ?? result.status] ??
-          "扫码未完成，请重新生成二维码。",
-      );
+      if (reason === "login_not_found" || reason === "login_expired") {
+        setNotice("二维码已失效，请重新生成。");
+        setError(null);
+      } else {
+        setError(
+          ERROR_MESSAGES[reason] ?? "扫码未完成，请重新生成二维码。",
+        );
+      }
     } catch (caught) {
-      setError(errorMessage(caught));
+      // A vanished login surfaces as a thrown ApiError, not as a status field.
+      const code = caught instanceof ApiError ? caught.message : null;
+      if (code === "login_not_found" || code === "login_expired") {
+        setLogin(null);
+        setPhase("disconnected");
+        setNotice("二维码已失效，请重新生成。");
+        setError(null);
+      } else {
+        setError(errorMessage(caught));
+      }
     } finally {
       pollingRef.current = false;
     }
@@ -618,11 +678,21 @@ export default function LearningConnectorDialog({
 
         {phase === "disabled" ? (
           <div className="learning-state-card">
-            <Unplug size={30} />
-            <h3>学习通连接尚未启用</h3>
-            <p>管理员开启连接器并配置服务器加密密钥后即可使用。</p>
+            <span className="learning-state-icon">
+              <Unplug size={30} />
+            </span>
+            <h3>学习通在线连接未开启</h3>
+            <p>
+              在线扫码需要服务器开启学习通连接器并配置加密密钥。
+              不影响使用：把学习通的课程资料下载成 ZIP 压缩包，同样可以导入知识库。
+            </p>
+            <ol className="learning-zip-steps">
+              <li>在学习通里打开课程，把要用的文档下载到电脑</li>
+              <li>按课程建文件夹，把文档放进去，整体压缩成 ZIP</li>
+              <li>点下面的按钮选择这个 ZIP，预览后即可导入</li>
+            </ol>
             <button
-              className="secondary-button"
+              className="primary-button"
               onClick={() => zipInputRef.current?.click()}
               disabled={Boolean(busy)}
               type="button"
@@ -632,8 +702,49 @@ export default function LearningConnectorDialog({
               ) : (
                 <FolderInput size={17} />
               )}
-              {busy === "zip" ? "正在检查资料包" : "改用 ZIP 资料包导入"}
+              {busy === "zip" ? "正在检查资料包" : "选择 ZIP 资料包"}
             </button>
+          </div>
+        ) : null}
+
+        {phase === "unreachable" ? (
+          <div className="learning-state-card">
+            <span className="learning-state-icon warn">
+              <AlertCircle size={28} />
+            </span>
+            <h3>暂时读不到连接器状态</h3>
+            <p>
+              可能是网络中断或服务正在重启。学习通扫码依赖后端连接器，
+              状态不可用时无法生成二维码。
+            </p>
+            {error ? (
+              <p className="learning-inline-error" role="alert">
+                {error}
+              </p>
+            ) : null}
+            <div className="learning-state-actions">
+              <button
+                className="primary-button"
+                onClick={() => void reloadStatus()}
+                disabled={Boolean(busy)}
+              >
+                <RefreshCw size={17} />
+                重新检查
+              </button>
+              <button
+                className="secondary-button"
+                onClick={() => zipInputRef.current?.click()}
+                disabled={Boolean(busy)}
+                type="button"
+              >
+                {busy === "zip" ? (
+                  <LoaderCircle className="spin" size={17} />
+                ) : (
+                  <FolderInput size={17} />
+                )}
+                {busy === "zip" ? "正在检查资料包" : "改用 ZIP 资料包"}
+              </button>
+            </div>
           </div>
         ) : null}
 
@@ -852,8 +963,35 @@ export default function LearningConnectorDialog({
                             <small>{link}</small>
                           </li>
                         ))}
+                        {!course.documents.length &&
+                        !course.videoLinks.length ? (
+                          <li>
+                            <span>还没有读取到资料</span>
+                            <small>
+                              学习通的章节要按需读取，点右侧按钮获取。
+                            </small>
+                          </li>
+                        ) : null}
                       </ul>
                     </details>
+                    <button
+                      className="text-button learning-load-docs"
+                      onClick={() => void loadCourseDocuments(course.id)}
+                      disabled={Boolean(busy)}
+                      type="button"
+                    >
+                      {busy === `docs:${course.id}` ? (
+                        <>
+                          <LoaderCircle className="spin" size={14} />
+                          正在读取
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw size={14} />
+                          读取资料
+                        </>
+                      )}
+                    </button>
                   </article>
                 );
               })}

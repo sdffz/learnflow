@@ -380,6 +380,74 @@ class LearningStore:
                 (status, utc_now(), workspace_id, user_id, provider),
             )
 
+    def latest_course_contents(
+        self,
+        workspace_id: str,
+        user_id: str,
+    ) -> dict[str, PreviewCourse]:
+        """Return the most recently fetched documents, keyed by course id.
+
+        Reading a course's chapters is expensive (one request per chapter), so
+        re-opening the dialog creates a fresh preview that must not throw that
+        work away. Only the newest preview per course is considered.
+        """
+        with self._lock:
+            course_rows = self.connection.execute(
+                """
+                SELECT c.id, c.external_id, c.title, c.teacher,
+                       c.video_links_json, c.preview_id,
+                       p.created_at
+                  FROM learning_preview_courses c
+                  JOIN learning_previews p ON p.id = c.preview_id
+                 WHERE c.workspace_id = ? AND c.user_id = ?
+                 ORDER BY p.created_at DESC
+                """,
+                (workspace_id, user_id),
+            ).fetchall()
+            file_rows = self.connection.execute(
+                """
+                SELECT * FROM learning_preview_files
+                 WHERE workspace_id = ? AND user_id = ?
+                 ORDER BY course_id, position
+                """,
+                (workspace_id, user_id),
+            ).fetchall()
+
+        files_by_preview: dict[tuple[str, str], list[PreviewFile]] = {}
+        for row in file_rows:
+            files_by_preview.setdefault(
+                (row["preview_id"], row["course_id"]), []
+            ).append(
+                PreviewFile(
+                    id=row["id"],
+                    name=row["name"],
+                    extension=row["extension"],
+                    size_bytes=row["size_bytes"],
+                    supported=bool(row["supported"]),
+                    excluded_reason=row["excluded_reason"],
+                    remote_url=row["remote_url"],
+                    archive_member=row["archive_member"],
+                )
+            )
+
+        contents: dict[str, PreviewCourse] = {}
+        for row in course_rows:
+            external = row["external_id"]
+            if external in contents:
+                continue
+            documents = files_by_preview.get((row["preview_id"], row["id"]), [])
+            videos = json.loads(row["video_links_json"] or "[]")
+            if not documents and not videos:
+                continue
+            contents[external] = PreviewCourse(
+                id=external,
+                title=row["title"],
+                teacher=row["teacher"],
+                documents=documents,
+                video_links=videos,
+            )
+        return contents
+
     def create_preview(
         self,
         *,
@@ -462,6 +530,75 @@ class LearningStore:
         if loaded is None:
             raise RuntimeError("preview_save_failed")
         return loaded
+
+    def replace_preview_course_contents(
+        self,
+        *,
+        preview_id: str,
+        course_id: str,
+        workspace_id: str,
+        user_id: str,
+        documents: list[PreviewFile],
+        video_links: list[str],
+    ) -> None:
+        """Swap in the documents fetched for one preview course.
+
+        The catalog lists courses without walking their chapters, because a
+        real account can hold dozens of courses and each chapter costs a
+        request. Documents are filled in per course when the learner selects
+        it.
+        """
+        with self._lock, self.connection:
+            row = self.connection.execute(
+                """
+                SELECT 1 FROM learning_preview_courses
+                 WHERE id = ? AND preview_id = ?
+                   AND workspace_id = ? AND user_id = ?
+                """,
+                (course_id, preview_id, workspace_id, user_id),
+            ).fetchone()
+            if row is None:
+                raise ValueError("preview_course_not_found")
+            self.connection.execute(
+                "DELETE FROM learning_preview_files"
+                " WHERE preview_id = ? AND course_id = ?",
+                (preview_id, course_id),
+            )
+            self.connection.execute(
+                "UPDATE learning_preview_courses SET video_links_json = ?"
+                " WHERE id = ? AND preview_id = ?",
+                (
+                    json.dumps(video_links, ensure_ascii=False),
+                    course_id,
+                    preview_id,
+                ),
+            )
+            for position, file in enumerate(documents):
+                self.connection.execute(
+                    """
+                    INSERT INTO learning_preview_files
+                        (id, preview_id, course_id, workspace_id, user_id,
+                         name, extension, size_bytes, remote_url,
+                         archive_member, supported, excluded_reason,
+                         position)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        file.id,
+                        preview_id,
+                        course_id,
+                        workspace_id,
+                        user_id,
+                        file.name,
+                        file.extension,
+                        max(file.size_bytes, 0),
+                        file.remote_url,
+                        file.archive_member,
+                        int(file.supported),
+                        file.excluded_reason,
+                        position,
+                    ),
+                )
 
     def get_preview(
         self,

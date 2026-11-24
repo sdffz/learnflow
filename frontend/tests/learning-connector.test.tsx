@@ -241,12 +241,12 @@ test("disabled connector explains why the action is unavailable", async () => {
     />,
   );
 
-  expect(await screen.findByText("学习通连接尚未启用")).toBeInTheDocument();
+  expect(await screen.findByText("学习通在线连接未开启")).toBeInTheDocument();
   expect(
     screen.queryByRole("button", { name: "生成学习通二维码" }),
   ).not.toBeInTheDocument();
   expect(
-    screen.getByRole("button", { name: "改用 ZIP 资料包导入" }),
+    screen.getByRole("button", { name: "选择 ZIP 资料包" }),
   ).toBeInTheDocument();
 });
 
@@ -300,7 +300,7 @@ test("ZIP fallback opens a preview even when the connector is disabled", async (
       onImported={vi.fn()}
     />,
   );
-  await screen.findByText("学习通连接尚未启用");
+  await screen.findByText("学习通在线连接未开启");
   const input = screen.getByLabelText("选择 ZIP 资料包");
   fireEvent.change(input, {
     target: {

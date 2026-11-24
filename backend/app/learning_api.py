@@ -316,6 +316,38 @@ def build_learning_router(
         return preview
 
     @router.post(
+        "/chaoxing/previews/{preview_id}/courses/{course_id}/documents",
+        response_model=ImportPreview,
+    )
+    def load_course_documents(
+        preview_id: str,
+        course_id: str,
+        request: Request,
+        auth: AuthContext = Depends(auth_manager.require_auth),
+    ) -> ImportPreview:
+        """Fetch one course's chapters and attachments on demand."""
+        require_enabled()
+        preview_limiter.check(auth.user_id)
+        try:
+            preview = service.load_course_documents(
+                auth.workspace_id,
+                auth.user_id,
+                preview_id,
+                course_id,
+            )
+        except Exception as exc:
+            _raise_learning_error(exc)
+        audit(
+            auth,
+            request,
+            "learning.preview.course_documents",
+            "learning_preview",
+            preview_id,
+            {"courseId": course_id},
+        )
+        return preview
+
+    @router.post(
         "/imports/zip/previews",
         response_model=ImportPreview,
         status_code=201,

@@ -159,14 +159,69 @@ class LearningService:
             raise
         except Exception as exc:
             raise ChaoxingAdapterError("upstream_unavailable") from exc
+        # Re-opening the dialog rebuilds the preview. Carry over documents that
+        # were already fetched, otherwise every visit resets them to empty and
+        # the user has to read each course again.
+        cached = self.learning_store.latest_course_contents(workspace_id, user_id)
+        merged = [
+            cached.get(course.id, course) for course in courses
+        ]
         preview = self.learning_store.create_preview(
             workspace_id=workspace_id,
             user_id=user_id,
-            courses=courses,
+            courses=merged,
             expires_at=(datetime.now(UTC) + PREVIEW_TTL).isoformat(),
         )
         self.learning_store.touch_connection(workspace_id, user_id)
         return preview
+
+    def load_course_documents(
+        self,
+        workspace_id: str,
+        user_id: str,
+        preview_id: str,
+        course_id: str,
+    ) -> ImportPreview:
+        """Fetch one preview course's documents and store them."""
+        connection = self.learning_store.load_connection(workspace_id, user_id)
+        if (
+            connection is None
+            or connection.status != "connected"
+            or not connection.cookies
+        ):
+            raise ValueError("session_expired")
+        preview = self.learning_store.get_preview(workspace_id, user_id, preview_id)
+        if preview is None:
+            raise ValueError("preview_not_found")
+        course = next(
+            (item for item in preview.courses if item.id == course_id), None
+        )
+        if course is None:
+            raise ValueError("preview_course_not_found")
+        external = course.id.split(":", 1)
+        external_course_id = external[0]
+        class_id = external[1] if len(external) > 1 else ""
+        fetched = self.adapter.course_documents(
+            connection.cookies,
+            course_id=external_course_id,
+            class_id=class_id,
+            cpi="",
+            title=course.title,
+            teacher=course.teacher,
+        )
+        self.learning_store.replace_preview_course_contents(
+            preview_id=preview_id,
+            course_id=course_id,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            documents=fetched.documents,
+            video_links=fetched.video_links,
+        )
+        self.learning_store.touch_connection(workspace_id, user_id)
+        updated = self.learning_store.get_preview(workspace_id, user_id, preview_id)
+        if updated is None:
+            raise ValueError("preview_not_found")
+        return updated
 
     def create_zip_preview(
         self,
