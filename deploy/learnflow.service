@@ -1,0 +1,28 @@
+[Unit]
+Description=LearnFlow FastAPI service
+After=network.target
+
+[Service]
+Type=simple
+User=learnflow
+Group=learnflow
+WorkingDirectory=/opt/learnflow/current/backend
+EnvironmentFile=-/etc/learnflow/learnflow.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/learnflow/current/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1 --proxy-headers
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/learnflow
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

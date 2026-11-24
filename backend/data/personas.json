@@ -1,0 +1,61 @@
+{
+  "personas": [
+    {
+      "id": "beginner",
+      "name": "林小满",
+      "label": "概念入门型",
+      "summary": "零基础、视觉偏好，希望通过项目建立人工智能直觉。",
+      "profile": {
+        "dimensions": {
+          "先修知识": {"value": "入门", "evidence": "刚接触人工智能", "confidence": 0.9},
+          "学习目标": {"value": "完成项目", "evidence": "想亲手完成课程项目", "confidence": 0.9},
+          "认知风格": {"value": "视觉型", "evidence": "喜欢图解和动画", "confidence": 0.88},
+          "当前薄弱点": {"value": "神经网络", "evidence": "对反向传播没有概念", "confidence": 0.86},
+          "资源偏好": {"value": "视频动画", "evidence": "文字太多容易走神", "confidence": 0.9},
+          "学习节奏": {"value": "每周固定学习", "evidence": "每周可以投入 6 小时", "confidence": 0.85},
+          "编程基础": {"value": "零基础", "evidence": "没有写过 Python", "confidence": 0.95},
+          "兴趣方向": {"value": "机器人", "evidence": "希望做机器人小项目", "confidence": 0.82}
+        },
+        "mastery": {"人工智能概述": 0.2, "搜索与问题求解": 0.1, "机器学习": 0.1, "神经网络": 0.05, "人工智能伦理": 0.15}
+      }
+    },
+    {
+      "id": "exam",
+      "name": "周知远",
+      "label": "考试冲刺型",
+      "summary": "具备基础，目标是章节测验，需要紧凑的知识清单和易错题。",
+      "profile": {
+        "dimensions": {
+          "先修知识": {"value": "具备编程基础", "evidence": "学过 Python 基础", "confidence": 0.9},
+          "学习目标": {"value": "准备考试", "evidence": "两周后参加章节测验", "confidence": 0.95},
+          "认知风格": {"value": "分析型", "evidence": "喜欢推导和原理", "confidence": 0.86},
+          "当前薄弱点": {"value": "机器学习", "evidence": "过拟合和评价指标混淆", "confidence": 0.9},
+          "资源偏好": {"value": "练习题库", "evidence": "希望多做分层题", "confidence": 0.9},
+          "学习节奏": {"value": "每日短时学习", "evidence": "每天 40 分钟", "confidence": 0.88},
+          "编程基础": {"value": "入门", "evidence": "会基础语法", "confidence": 0.85},
+          "兴趣方向": {"value": "计算机视觉", "evidence": "关注图像识别", "confidence": 0.75}
+        },
+        "mastery": {"人工智能概述": 0.55, "搜索与问题求解": 0.45, "机器学习": 0.3, "神经网络": 0.35, "人工智能伦理": 0.5}
+      }
+    },
+    {
+      "id": "project",
+      "name": "许拓",
+      "label": "项目实践型",
+      "summary": "编程熟练，希望用代码实验理解模型并完成一个可展示项目。",
+      "profile": {
+        "dimensions": {
+          "先修知识": {"value": "具备编程基础", "evidence": "完成过 Python 课程设计", "confidence": 0.92},
+          "学习目标": {"value": "完成项目", "evidence": "准备做图像分类小项目", "confidence": 0.96},
+          "认知风格": {"value": "实践型", "evidence": "通过动手理解概念", "confidence": 0.94},
+          "当前薄弱点": {"value": "神经网络", "evidence": "知道框架但不懂训练细节", "confidence": 0.9},
+          "资源偏好": {"value": "代码实操", "evidence": "希望直接看可运行案例", "confidence": 0.95},
+          "学习节奏": {"value": "每周固定学习", "evidence": "每周投入 10 小时", "confidence": 0.88},
+          "编程基础": {"value": "熟练", "evidence": "有完整项目经验", "confidence": 0.93},
+          "兴趣方向": {"value": "自然语言处理", "evidence": "对语言模型感兴趣", "confidence": 0.82}
+        },
+        "mastery": {"人工智能概述": 0.65, "搜索与问题求解": 0.6, "机器学习": 0.55, "神经网络": 0.35, "人工智能伦理": 0.45}
+      }
+    }
+  ]
+}

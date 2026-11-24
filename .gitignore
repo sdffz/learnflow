@@ -1,0 +1,30 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+.superpowers/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+backend/data/runtime/
+backend/data/generated/
+backend/build/
+backend/*.egg-info/
+
+# Node
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+
+# Submission artifacts
+submission/
+presentation/
+
+# Local scratch
+.msg.txt
+.git-commit-msg.txt
