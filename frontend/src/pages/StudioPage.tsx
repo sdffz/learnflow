@@ -50,6 +50,10 @@ export function topicFromProfile(learner: Learner | null): string {
         "",
       )
       .replace(/^(对|关于)/, "")
+      // "操作系统和计算机网络都" -> "操作系统和计算机网络": the qualifier
+      // removal can leave a trailing particle behind.
+      .replace(/[都也还就才又很太]+$/, "")
+      .replace(/[，,、；;。\s]+$/, "")
       .trim();
     if (cleaned) return cleaned;
   }
@@ -87,10 +91,27 @@ export default function StudioPage({
     }
   }, [learner, onWorkspaceChange, workspace.activeTopic]);
 
+  // Keep a usable course selected. Test imports left several empty folders
+  // behind, and picking one silently produces resources with no sources.
   useEffect(() => {
-    if (courses.some((course) => course.id === courseId)) return;
-    setCourseId(courses[0]?.id ?? "");
-  }, [courseId, courses]);
+    const current = courses.find((course) => course.id === courseId);
+    if (current && (current.knowledgeCount ?? 0) > 0) return;
+    const usable = courses.filter((course) => (course.knowledgeCount ?? 0) > 0);
+    if (!usable.length) {
+      // Nothing has material yet; fall back to the first course so the screen
+      // still explains itself instead of pointing at a missing id.
+      if (current) return;
+      setCourseId(courses[0]?.id ?? "");
+      return;
+    }
+    // Prefer a folder whose name overlaps the topic ("Python基础" for Python).
+    const probe = topic.slice(0, 2);
+    const matching =
+      probe.length > 0
+        ? usable.find((course) => course.title.includes(probe))
+        : undefined;
+    setCourseId((matching ?? usable[0]).id);
+  }, [courseId, courses, topic]);
 
   useEffect(() => {
     if (
@@ -269,11 +290,18 @@ export default function StudioPage({
       <div className="studio-knowledge-context">
         <Sparkles size={16} />
         {selectedCourse ? (
-          <span>
-            将使用《{selectedCourse.title}》中的{" "}
-            <strong>{selectedCourse.knowledgeCount}</strong>{" "}
-            个个人知识片段生成并标注来源
-          </span>
+          (selectedCourse.knowledgeCount ?? 0) > 0 ? (
+            <span>
+              将使用《{selectedCourse.title}》中的{" "}
+              <strong>{selectedCourse.knowledgeCount}</strong>{" "}
+              个个人知识片段生成并标注来源
+            </span>
+          ) : (
+            <span>
+              《{selectedCourse.title}》还没有资料，无法生成。
+              请换一个已有资料的文件夹，或先往这个文件夹里添加资料。
+            </span>
+          )
         ) : (
           <span>请先在知识文件夹创建文件夹并添加资料</span>
         )}

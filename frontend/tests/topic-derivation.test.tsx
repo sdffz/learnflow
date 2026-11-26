@@ -104,3 +104,46 @@ test("an explicitly chosen topic is never overwritten", () => {
   expect(input.value).toBe("机器学习");
   expect(onWorkspaceChange).not.toHaveBeenCalled();
 });
+
+test("an empty course folder is never the default selection", () => {
+  const onWorkspaceChange = vi.fn();
+  const learner = learnerWith({ 当前薄弱点: "操作系统和计算机网络都不太行" });
+  const empty: Course = {
+    id: "empty",
+    title: "线性代数（工科）",
+    description: "",
+    color: "#e25d3f",
+    assetCount: 0,
+    knowledgeCount: 0,
+  } as Course;
+  const usable: Course = {
+    id: "usable",
+    title: "Python基础",
+    description: "",
+    color: "#e25d3f",
+    assetCount: 33,
+    knowledgeCount: 120,
+  } as Course;
+
+  render(
+    <StudioPage
+      learner={learner}
+      onNeedLearner={() => undefined}
+      workspace={createDefaultWorkspace()}
+      onWorkspaceChange={onWorkspaceChange}
+      onNavigate={() => undefined}
+      courses={[empty, usable]}
+    />,
+  );
+
+  // The empty folder would produce resources with no sources, so it must not
+  // be the one the generate button acts on.
+  const select = screen.getByLabelText("知识来源") as HTMLSelectElement;
+  expect(select.value).toBe("usable");
+});
+
+test("trailing particles are stripped from a derived topic", () => {
+  expect(
+    topicFromProfile(learnerWith({ 当前薄弱点: "操作系统和计算机网络都不太行" })),
+  ).toBe("操作系统和计算机网络");
+});

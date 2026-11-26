@@ -39,6 +39,14 @@ class Repository:
                     updated_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS path_progress (
+                    workspace_id TEXT NOT NULL,
+                    learner_id TEXT NOT NULL,
+                    node_id TEXT NOT NULL,
+                    completed_at TEXT NOT NULL,
+                    PRIMARY KEY (workspace_id, learner_id, node_id)
+                );
+
                 CREATE TABLE IF NOT EXISTS runs (
                     id TEXT PRIMARY KEY,
                     learner_id TEXT NOT NULL REFERENCES learners(id),
@@ -200,6 +208,49 @@ class Repository:
             )
         if result.rowcount == 0:
             raise KeyError(learner_id)
+
+    def completed_path_nodes(
+        self,
+        learner_id: str,
+        workspace_id: str = DEFAULT_WORKSPACE_ID,
+    ) -> set[str]:
+        with self._lock:
+            rows = self.connection.execute(
+                """
+                SELECT node_id FROM path_progress
+                 WHERE learner_id = ? AND workspace_id = ?
+                """,
+                (learner_id, workspace_id),
+            ).fetchall()
+        return {row["node_id"] for row in rows}
+
+    def mark_path_node(
+        self,
+        learner_id: str,
+        node_id: str,
+        completed: bool,
+        workspace_id: str = DEFAULT_WORKSPACE_ID,
+    ) -> None:
+        with self._lock, self.connection:
+            if not completed:
+                self.connection.execute(
+                    """
+                    DELETE FROM path_progress
+                     WHERE learner_id = ? AND node_id = ? AND workspace_id = ?
+                    """,
+                    (learner_id, node_id, workspace_id),
+                )
+                return
+            self.connection.execute(
+                """
+                INSERT INTO path_progress
+                    (workspace_id, learner_id, node_id, completed_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(workspace_id, learner_id, node_id)
+                DO UPDATE SET completed_at = excluded.completed_at
+                """,
+                (workspace_id, learner_id, node_id, utc_now()),
+            )
 
     def create_run(
         self,

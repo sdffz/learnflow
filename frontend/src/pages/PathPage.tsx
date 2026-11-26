@@ -30,6 +30,7 @@ export default function PathPage({
   const [path, setPath] = useState<LearningPath | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [toggling, setToggling] = useState<string | null>(null);
 
   const loadPath = useCallback(() => {
     if (!learner) return;
@@ -57,6 +58,25 @@ export default function PathPage({
 
   useEffect(() => loadPath(), [loadPath]);
 
+  const toggleNode = useCallback(
+    async (nodeId: string, completed: boolean) => {
+      if (!learner || toggling) return;
+      setToggling(nodeId);
+      setError(null);
+      try {
+        const next = await api.markPathNode(learner.id, nodeId, completed);
+        setPath(next);
+      } catch (caught) {
+        setError(
+          caught instanceof Error ? caught.message : "更新学习进度失败",
+        );
+      } finally {
+        setToggling(null);
+      }
+    },
+    [learner, toggling],
+  );
+
   if (!learner) {
     return (
       <div className="empty-page">
@@ -69,6 +89,13 @@ export default function PathPage({
       </div>
     );
   }
+
+  const doneCount = path
+    ? path.nodes.filter((node) => node.status === "completed").length
+    : 0;
+  const totalCount = path?.nodes.length ?? 0;
+  const progressPercent =
+    totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
 
   return (
     <div className="page-stack">
@@ -115,6 +142,26 @@ export default function PathPage({
             <p>{path.adjustment_note}</p>
           </div>
 
+          <div className="path-progress">
+            <div className="path-progress-copy">
+              <strong>
+                {doneCount} / {totalCount}
+              </strong>
+              <span>已完成节点</span>
+            </div>
+            <div
+              className="path-progress-bar"
+              role="progressbar"
+              aria-valuenow={progressPercent}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-label="学习路径完成进度"
+            >
+              <div style={{ width: `${progressPercent}%` }} />
+            </div>
+            <span className="path-progress-percent">{progressPercent}%</span>
+          </div>
+
           <ol className="path-list">
             {path.nodes.map((node, index) => (
               <li className={node.status} key={node.id}>
@@ -130,7 +177,13 @@ export default function PathPage({
                 <article>
                   <div className="path-node-top">
                     <span>STEP {String(index + 1).padStart(2, "0")}</span>
-                    <strong>{node.status === "current" ? "当前节点" : "待学习"}</strong>
+                    <strong>
+                      {node.status === "completed"
+                        ? "已完成"
+                        : node.status === "current"
+                          ? "当前节点"
+                          : "待学习"}
+                    </strong>
                   </div>
                   <h3>{node.title}</h3>
                   <span className="topic-pill">{node.topic}</span>
@@ -143,7 +196,29 @@ export default function PathPage({
                   {node.dependency ? (
                     <small>前置节点：{node.dependency}</small>
                   ) : null}
-                  {node.status === "current" ? (
+                  <div className="path-node-actions">
+                    <button
+                      className={`path-complete-toggle ${
+                        node.status === "completed" ? "done" : ""
+                      }`}
+                      aria-pressed={node.status === "completed"}
+                      disabled={toggling === node.id}
+                      onClick={() =>
+                        void toggleNode(
+                          node.id,
+                          node.status !== "completed",
+                        )
+                      }
+                    >
+                      {toggling === node.id ? (
+                        <LoaderCircle className="spin" size={14} />
+                      ) : node.status === "completed" ? (
+                        <Check size={14} />
+                      ) : (
+                        <Circle size={14} />
+                      )}
+                      {node.status === "completed" ? "已完成" : "标记为完成"}
+                    </button>
                     <button
                       className="path-resource-action"
                       onClick={() => onNavigate("studio")}
@@ -151,7 +226,7 @@ export default function PathPage({
                       查看匹配资源
                       <ArrowRight size={14} />
                     </button>
-                  ) : null}
+                  </div>
                 </article>
               </li>
             ))}

@@ -225,6 +225,17 @@ export const api = {
     return request(`/learners/${learnerId}/paths`, { method: "POST" });
   },
 
+  markPathNode(
+    learnerId: string,
+    nodeId: string,
+    completed: boolean,
+  ): Promise<LearningPath> {
+    return request(`/learners/${learnerId}/paths/${encodeURIComponent(nodeId)}`, {
+      method: "POST",
+      body: JSON.stringify({ completed }),
+    });
+  },
+
   askTutor(learnerId: string, question: string): Promise<TutorAnswer> {
     return request(`/learners/${learnerId}/tutor`, {
       method: "POST",

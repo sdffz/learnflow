@@ -5048,3 +5048,100 @@ h1 {
   gap: 5px;
   white-space: nowrap;
 }
+
+/* ------------------------------------------------------- path completion */
+
+.path-progress {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 14px 18px;
+  border-radius: 16px;
+  background: rgba(21, 50, 74, 0.045);
+}
+
+.path-progress-copy strong {
+  font-size: 16px;
+  color: #15324a;
+}
+
+.path-progress-copy span {
+  margin-left: 6px;
+  font-size: 11px;
+  color: #6b7b88;
+}
+
+.path-progress-bar {
+  flex: 1;
+  min-width: 120px;
+  height: 7px;
+  border-radius: 4px;
+  background: rgba(21, 50, 74, 0.1);
+  overflow: hidden;
+}
+
+.path-progress-bar > div {
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #e25d3f, #f08a5d);
+  transition: width 0.35s ease;
+}
+
+.path-progress-percent {
+  font-size: 12px;
+  font-weight: 700;
+  color: #2f7a55;
+  font-variant-numeric: tabular-nums;
+}
+
+.path-node-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.path-complete-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 10px;
+  border: 1px dashed rgba(21, 50, 74, 0.28);
+  background: transparent;
+  color: #4a6278;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.16s ease, color 0.16s ease, background 0.16s ease;
+}
+
+.path-complete-toggle:hover:not(:disabled) {
+  border-color: #e25d3f;
+  color: #e25d3f;
+}
+
+.path-complete-toggle.done {
+  border-style: solid;
+  border-color: rgba(47, 122, 85, 0.5);
+  background: rgba(47, 122, 85, 0.09);
+  color: #2f7a55;
+}
+
+.path-complete-toggle:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.path-list li.completed article h3 {
+  text-decoration: line-through;
+  text-decoration-color: rgba(21, 50, 74, 0.35);
+  color: #5f7382;
+}
+
+.path-list li.completed .path-marker {
+  background: #2f7a55;
+  border-color: #2f7a55;
+  color: #fffdf8;
+}

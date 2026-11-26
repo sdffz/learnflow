@@ -53,6 +53,10 @@ class TutorRequest(BaseModel):
     question: str = Field(min_length=1, max_length=1000)
 
 
+class PathNodeRequest(BaseModel):
+    completed: bool = True
+
+
 class AssessmentRequest(BaseModel):
     phase: str = "post"
     answers: dict[str, int]
@@ -419,7 +423,36 @@ def build_router(
         auth: AuthContext = Depends(auth_manager.require_auth),
     ) -> LearningPath:
         learner = _require_learner(repository, learner_id, auth.workspace_id)
-        return path_agent.build(learner)
+        completed = repository.completed_path_nodes(learner_id, auth.workspace_id)
+        return path_agent.build(learner, completed)
+
+    @router.post("/learners/{learner_id}/paths/{node_id}")
+    def mark_path_node(
+        learner_id: str,
+        node_id: str,
+        request: PathNodeRequest,
+        http_request: Request,
+        auth: AuthContext = Depends(auth_manager.require_auth),
+    ) -> LearningPath:
+        """Tick or untick one node and return the rebuilt path."""
+        learner = _require_learner(repository, learner_id, auth.workspace_id)
+        repository.mark_path_node(
+            learner_id,
+            node_id,
+            request.completed,
+            auth.workspace_id,
+        )
+        auth_manager.audit(
+            workspace_id=auth.workspace_id,
+            user_id=auth.user_id,
+            action="path.node",
+            resource_type="learner",
+            resource_id=learner_id,
+            metadata={"nodeId": node_id, "completed": request.completed},
+            ip_address=http_request.client.host if http_request.client else None,
+        )
+        completed = repository.completed_path_nodes(learner_id, auth.workspace_id)
+        return path_agent.build(learner, completed)
 
     @router.post("/learners/{learner_id}/tutor")
     def tutor(

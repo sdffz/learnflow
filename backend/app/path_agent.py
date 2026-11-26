@@ -49,7 +49,11 @@ TOPICS = {
 
 
 class PathAgent:
-    def build(self, learner: Learner) -> LearningPath:
+    def build(
+        self,
+        learner: Learner,
+        completed: set[str] | None = None,
+    ) -> LearningPath:
         profile = learner.profile
         weak_dimension = profile.dimensions.get("当前薄弱点")
         weak_point = weak_dimension.value if weak_dimension else "机器学习"
@@ -80,7 +84,7 @@ class PathAgent:
                     id=f"node-{index + 1}",
                     title=node["title"],
                     topic=topic,
-                    status="current" if index == 0 else "planned",
+                    status=self._status(f"node-{index + 1}", completed),
                     dependency=previous_topic,
                     recommendation=(
                         f"因为你的目标是“{goal}”，且当前需要加强“{weak_point}”，"
@@ -91,6 +95,13 @@ class PathAgent:
             )
             previous_topic = topic
 
+        # The first unfinished node is the one to work on next.
+        first_open = next(
+            (node for node in nodes if node.status != "completed"), None
+        )
+        for node in nodes:
+            if node is first_open:
+                node.status = "current"
         return LearningPath(
             learner_id=learner.id,
             title=f"{learner.name}的《人工智能导论》学习路径",
@@ -100,3 +111,9 @@ class PathAgent:
                 "完成练习后系统会再次调整。"
             ),
         )
+
+    @staticmethod
+    def _status(node_id: str, completed: set[str] | None) -> str:
+        if completed and node_id in completed:
+            return "completed"
+        return "planned"
